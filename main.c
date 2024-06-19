@@ -22,7 +22,7 @@
 #define SAMPLE_TIME_S 0.01f
 
 /* Maximum run-time of simulation */
-#define SIMULATION_TIME_MAX 4.0f
+#define SIMULATION_TIME_MAX 15.0f
 
 /* Simulated dynamical system (first order) */
 float TestSystem_Update(float inp);
@@ -41,18 +41,24 @@ int main()
     /* Simulate response using test system */
     float setpoint = 1.0f;
 
-    printf("Time (s)\tSystem Output\tControllerOutput\r\n");
+    FILE *fp;
+    fp = fopen("PID.csv", "w");
+    fprintf(fp, "Time (s),System Output,ControllerOutput\n");
     for (float t = 0.0f; t <= SIMULATION_TIME_MAX; t += SAMPLE_TIME_S) {
 
         /* Get measurement from system */
         float measurement = TestSystem_Update(pid.out);
+//        float measurement = TestSystem_Update(10);
 
         /* Compute new control signal */
         PIDController_Update(&pid, setpoint, measurement);
 
-        printf("%f\t%f\t%f\r\n", t, measurement, pid.out);
+//        printf("%f\t%f\t%f\r\n", t, measurement, pid.out);
+        fprintf(fp, "%f,%f,%f\n", t, measurement, pid.out);
 
     }
+
+    fclose(fp);
 
     return 0;
 }
