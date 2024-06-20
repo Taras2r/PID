@@ -1,6 +1,13 @@
 #ifndef PID_CONTROLLER_H
 #define PID_CONTROLLER_H
 
+//#define DEBUG_PID
+#ifdef DEBUG_PID
+#define debug(text_format, ...)  printf( text_format, ##__VA_ARGS__ )
+#else
+  #define debug(text_format, ...)
+#endif
+
 typedef struct {
 
     /* Controller gains */
