@@ -8,6 +8,13 @@
   #define debug(text_format, ...)
 #endif
 
+//#define DEBUG_FIRST_ORDER
+#ifdef DEBUG_FIRST_ORDER
+#define debugFirstOrder(text_format, ...)  printf( text_format, ##__VA_ARGS__ )
+#else
+  #define debugFirstOrder(text_format, ...)
+#endif
+
 typedef struct {
 
     /* Controller gains */
@@ -34,6 +41,8 @@ typedef struct {
     float prevError;            /* Required for integrator */
     float differentiator;
     float prevMeasurement;      /* Required for differentiator */
+    float measurement;      /* Required for differentiator */
+    float error;      /* Required for differentiator */
 
     /* Controller output */
     float out;

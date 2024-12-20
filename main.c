@@ -1,17 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "PID.h"
+#include "Filters\LP1Order.h"
+#include"Filters\Butterworth2Order.h"
 
 //https://github.com/pms67/PID/tree/master
 //https://youtu.be/zOByx3Izf5U?si=gVV6eAvSPnZyn5_2
 
 /* Controller parameters */
-#define PID_KP  70.0f
-#define PID_KI  10.0f
-#define PID_KD  0.0f
+#define PID_KP  90.0f
+#define PID_KI  0.0f
+#define PID_KD 0.001f
 
-#define PID_TAU 0.15f
+#define PID_TAU 0.0000001f
 
 #define PID_LIM_MIN -3.40282347e+38F
 #define PID_LIM_MAX  3.40282347e+38F
@@ -28,13 +31,21 @@
 #define ITERATIONS 15001 // SIMULATION_TIME_MAX * SAMPLE_TIME_S todo recalculate
                         //ITERATIONS whenever SIMULATION_TIME_MAX or SAMPLE_TIME_S
                         //is changed
-#define PID_SAMPLE_RATE 10
+#define PID_SAMPLE_RATE 25
 #define SYSTEM_TIME_CONSTANT 0.5
 
 /* Simulated dynamic system (first order) */
 float TestSystem_Update( float inp );
 
+/*Generate the sine function to introduce a noise to the system response*/
+double sinus( double currTime )
+{
+    double freq = 1.0;
 
+    double angle = sin( 2 * M_PI * freq * currTime );
+
+    return angle;
+}
 //float secondOrderSystem( float input );
 
 struct secondOrderDerevative
@@ -55,6 +66,19 @@ struct firstOrderDerevative
     float U[ITERATIONS];
     float Y[ITERATIONS];
     float Yd[ITERATIONS];
+
+    //A time which represents the speed with which a particular system can respond to
+    //change, typically equal to the time taken for a specified parameter to vary by
+    //a factor of 1− 1 / e (approximately 0.6321).
+    const float timeConstant; // set in seconds
+
+    int i;
+};
+
+struct integratorDerevative
+{
+    float U[ITERATIONS];
+    float Y[ITERATIONS];
 
     //A time which represents the speed with which a particular system can respond to
     //change, typically equal to the time taken for a specified parameter to vary by
@@ -115,6 +139,7 @@ static struct secondOrderDerevative closedLoopSecondOrder =
 {
     .timeConstant = SYSTEM_TIME_CONSTANT,
 };
+
 float secondOrderSystem( struct secondOrderDerevative *storage, float input )
 {
     float Ud0 = 0;
@@ -159,6 +184,68 @@ float secondOrderSystem( struct secondOrderDerevative *storage, float input )
     return storage->Y[storage->i-1];
 }
 
+static struct integratorDerevative openLoopIntegrator =
+{
+    .timeConstant = SYSTEM_TIME_CONSTANT,
+};
+static struct integratorDerevative closedLoopIntegrator =
+{
+    .timeConstant = SYSTEM_TIME_CONSTANT,
+};
+float integratorTransferFunction( struct integratorDerevative *storage, float input )
+{
+//    static unsigned int i;
+//    static float timeConst = 1;
+
+//    static float U[ITERATIONS] = {0};
+//    static float Y[ITERATIONS] = {0};
+
+    if( storage->i == 0 )
+    {
+        storage->U[storage->i] = 0;
+        storage->Y[storage->i] = storage->U[storage->i] * SAMPLE_TIME_S /
+                                       storage->timeConstant + storage->Y[storage->i];
+    }
+    else
+    {
+        storage->U[storage->i] = input;
+        storage->Y[storage->i] = storage->U[storage->i] * SAMPLE_TIME_S /
+                                    storage->timeConstant + storage->Y[storage->i-1];
+    }
+
+    storage->i++;
+
+    return storage->Y[storage->i-1];
+}
+
+/******************************************************/
+//Main signal to test 1st Order LP-Filter
+struct Signal
+{
+    double freq;
+    double magnitude;
+    double phase;
+};
+static struct Signal signal =
+{
+        .freq = 2.0,
+        .magnitude = 1.0,
+        .phase = 0.0,
+};
+static struct Signal noise =
+{
+        .freq = 50.0,
+        .magnitude = 0.2,
+        .phase = 0.0,
+};
+double sinus2( double currTime, struct Signal signal )
+{
+    double angle =
+           signal.magnitude * sin( 2 * M_PI * signal.freq * currTime + signal.phase );
+
+    return angle;
+}
+/******************************************************/
 int main( void )
 {
     /*Sore the data to the file for further processing them with Python*/
@@ -169,10 +256,20 @@ int main( void )
              "First Order System Output Open Loop,"\
              "First Order System Output Closed Loop,"\
              "Second Order System Output Open Loop,"\
-             "Second Order System Output Closed Loop\n"
+             "Second Order System Output Closed Loop,"\
+             "Integrator Output Open Loop,"\
+             "Integrator Output Closed Loop,"\
+             "Sinus,"\
+             "Noisy Fisrt Order,"\
+             "Derivative,"\
+             "Prev Err,"\
+             "Curr Err,"\
+             "Filter in,"\
+             "Filter out,"\
+             "Filter BW out\n"
             );
 
-    /* Initialise PID controllers */
+    /* Initialize PID controllers */
     PIDController pid1 = { PID_KP, PID_KI, PID_KD,
                           PID_TAU,
                           PID_LIM_MIN, PID_LIM_MAX,
@@ -193,6 +290,16 @@ int main( void )
                                              //calculations are done to simulate discrete
                                              //implementation of the controller
 
+    PIDController pid3 = { PID_KP, PID_KI, PID_KD,
+                          PID_TAU,
+                          PID_LIM_MIN, PID_LIM_MAX,
+                          PID_LIM_MIN_INT, PID_LIM_MAX_INT,
+                          SAMPLE_TIME_S*PID_SAMPLE_RATE };
+                                             //PID controller is processed with 10 times
+                                             //slower sample rate than the system response
+                                             //calculations are done to simulate discrete
+                                             //implementation of the controller
+
     float setpoint = 1.0f;
     PIDController_Init( &pid1 );
     PIDController_Init( &pid2 );
@@ -201,6 +308,7 @@ int main( void )
     {
         static float measurement1order;
         static float measurement2order;
+        static float measurementIntegrator;
         static unsigned int counter;
 
         //Unit Step at send to the systems after 1 second
@@ -219,28 +327,89 @@ int main( void )
 
         float firstOrder = 0;
         float secondOrder = 0;
+        float integrator = 0;
+
+        double sinSig;
+        double mainSig;
+        double noiseSig;
+        static double testSig;
+        sinSig = sinus( t );
+        mainSig = sinus2( t, signal );
+        noiseSig = sinus2( t, noise );
+        testSig = mainSig + noiseSig;
+
+        static double filterOut;
+        static double filterBWOut;
+        static struct LP1Order filter =
+        {
+                .in = &testSig,
+                .out = &filterOut,
+
+                .a1 = 0.96906992,
+                .b[0] = 0.01546504,
+                .b[1] = 0.01546504,
+        };
+        static struct BW2Order filterBW =
+        {
+                .in = &testSig,
+                .out = &filterBWOut,
+
+                .a[0] = 1.95558189,
+                .a[1] = -0.95654717,
+                .b[0] = 0.00024132,
+                .b[1] = 0.00048264,
+                .b[2] = 0.00024132,
+        };
+
+        LP1Order( &filter );
+        Butterworth2Order( &filterBW );
 
         firstOrder = firstOrderSystem( &openLoopFirstOrder, stepInput );
         measurement1order = firstOrderSystem( &closedLoopFirstOrder, pid1.out );
 
         secondOrder = secondOrderSystem( &openLoopSecondOrder, stepInput );
+        double noisyFirstOrder = ( 0.1 * sinSig ) + (double)secondOrder;
+
+        if( 5.0 < t && t < 8.0 )
+        {
+        measurement2order = ( 0.4 * sinSig ) + secondOrderSystem( &closedLoopSecondOrder, pid2.out );
+        }
+        else
+        {
         measurement2order = secondOrderSystem( &closedLoopSecondOrder, pid2.out );
+        }
+
+        integrator = integratorTransferFunction( &openLoopIntegrator, stepInput );
+        measurementIntegrator =
+                        integratorTransferFunction( &closedLoopIntegrator, pid3.out );
+
 
         counter++;
         if( counter >= PID_SAMPLE_RATE && t >= 1 )
         {
             /* Compute new control signal */
-            PIDController_Update( &pid1, setpoint, measurement1order );
+//            PIDController_Update( &pid1, setpoint, measurement1order );
             PIDController_Update( &pid2, setpoint, measurement2order );
+//            PIDController_Update( &pid3, setpoint, measurementIntegrator );
             counter = 0;
         }
 
-        fprintf( fp, "%f, %f, %f, %f, %f\n",
+        fprintf( fp, "%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f\n",
                  t,
                  firstOrder,
                  measurement1order,
                  secondOrder,
-                 measurement2order
+                 measurement2order,
+                 integrator,
+                 measurementIntegrator,
+                 sinSig,
+                 noisyFirstOrder,
+                 pid2.differentiator,
+                 pid2.measurement,
+                 pid2.prevMeasurement,
+                 testSig,
+                 filterOut,
+                 filterBWOut
                 );
     }
 

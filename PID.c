@@ -1,5 +1,9 @@
 #include "PID.h"
 
+#ifndef _INC_STDIO
+#include<stdio.h>
+#endif
+
 void PIDController_Init(PIDController *pid) {
 
     /* Clear controller variables */
@@ -12,14 +16,14 @@ void PIDController_Init(PIDController *pid) {
     pid->out = 0.0f;
 
 }
-
+//Check theory by the below link
+//https://www.cds.caltech.edu/~murray/courses/cds101/fa02/caltech/astrom-ch6.pdf
 float PIDController_Update(PIDController *pid, float setpoint, float measurement) {
 
     /*
     * Error signal
     */
     float error = setpoint - measurement;
-
 
     /*
     * Proportional
@@ -52,6 +56,10 @@ float PIDController_Update(PIDController *pid, float setpoint, float measurement
                         + (2.0f * pid->tau - pid->T) * pid->differentiator)
                         / (2.0f * pid->tau + pid->T);
 
+//    pid->differentiator = pid->Kd * (error - pid->prevError) * -1.0;
+
+//    printf("%f\n", pid->differentiator);
+
 
     /*
     * Compute output and apply limits
@@ -69,8 +77,11 @@ float PIDController_Update(PIDController *pid, float setpoint, float measurement
     }
 
     /* Store error and measurement for later use */
+    pid->measurement = pid->prevMeasurement;
+    pid->error = pid->prevError;
     pid->prevError       = error;
     pid->prevMeasurement = measurement;
+
 
     /* Return controller output */
     return pid->out;
